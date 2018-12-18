@@ -72,9 +72,14 @@ class FastaMixtureMarker():
 		"""
 		
 		# read fasta
-		with open(seq_file,'r') as f:
-			for record in SeqIO.parse(f, 'fasta'):
-				seq = list(record.seq)
+		if seq_file.endswith('.gz'):
+			with gzip.open(seq_file,'rt') as f:
+				for record in SeqIO.parse(f, 'fasta'):
+					seq = list(record.seq)	
+		else:
+			with open(seq_file,'r') as f:
+				for record in SeqIO.parse(f, 'fasta'):
+					seq = list(record.seq)
 				
 		# read outputfile
 		df = pd.read_csv(mixed_bases_file, index_col='pos')
