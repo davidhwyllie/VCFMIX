@@ -43,14 +43,17 @@ from Bio import SeqIO, SeqRecord, SeqFeature
 
 class FastaMixtureMarker():
 	""" writes codes reflecting mixed base calls into a fasta file """
-	def __init__(self, expectedErrorRate, mlp_cutoff):
+	def __init__(self, expectedErrorRate, mlp_cutoff, clustering_cutoff = None, min_maf=0):
 		""" creates a component writing mixed base calls into fasta files.
 		    expectedErrorRate: the minor variant frequency expected.
 			mlp_cutoff : the -log P cutoff used for mixed base selection.
+			min_maf: the minimum minor variant frequency reported
+			clustering_cutoff: call bases N not mixed if within clustering_coutoff of another mixed base
 		"""
 		self.bt = BinomialTest(expectedErrorRate)	
 		self.mlp_cutoff = mlp_cutoff
-		
+		self.min_maf = min_maf
+		self.clustering_cutoff = clustering_cutoff
 		# iupac codes from https://www.bioinformatics.org/sms/iupac.html
 		# capitalisation indicates which way round the base frequencies are.
 		# if lower case, the first base alphabetically is more common;
@@ -83,17 +86,39 @@ class FastaMixtureMarker():
 				
 		# read outputfile
 		df = pd.read_csv(mixed_bases_file, index_col='pos')
-
+	
+		variants_to_update = {}
 		for ix in df.index:
-			mlp =df.loc[ix,'mlp']
-			if np.isnan(mlp):
-				p_value, mlp = self.bt.compute(df.loc[ix,'nonmajor'],df.loc[ix,'depth'])
-			if mlp > self.mlp_cutoff:		# the cutoff
-				base = pd.DataFrame({'base':['A','C','G','T'], 'depth':[df.loc[ix,'base_a'], df.loc[ix,'base_c'], df.loc[ix,'base_g'], df.loc[ix,'base_t']]})
-				base = base.sort_values(by='depth', ascending = False)
-				top2 = ''.join(base.head(2)['base'].tolist())
-				seq[ix-1]= self.iupac[top2]
+
+			maf = df.loc[ix,'maf']
+
+			if maf >= self.min_maf:
+				mlp =df.loc[ix,'mlp']
+				if np.isnan(mlp):
+					p_value, mlp = self.bt.compute(df.loc[ix,'nonmajor'],df.loc[ix,'depth'])
 				
+				if mlp >= self.mlp_cutoff:		# the cutoff
+					
+					base = pd.DataFrame({'base':['A','C','G','T'],
+										 'depth':[df.loc[ix,'base_a'],
+												  df.loc[ix,'base_c'],
+												  df.loc[ix,'base_g'],
+												  df.loc[ix,'base_t']
+												  ]})
+					
+					base = base.sort_values(by='depth', ascending = False)
+					top2 = ''.join(base.head(2)['base'].tolist())
+					variants_to_update[ix-1]= self.iupac[top2]
+				
+		previous = -10000000
+		for i in sorted(variants_to_update.keys()):
+			if self.clustering_cutoff is not None:
+				if i-previous < self.clustering_cutoff:
+					variants_to_update[i] = 'N'
+			previous = i
+
+			seq[i] = variants_to_update[i]
+		
 		return(''.join(seq))
 
 class BinomialTest():
@@ -455,7 +480,6 @@ class vcfScan():
 		self.region_stats= df
 		f.close()
 		
-
 class test_vcfScan_1(unittest.TestCase):
 	def runTest(self):
 		""" tests definition of regions """
@@ -584,11 +608,52 @@ class test_fastamixmark_1(unittest.TestCase):
 	
 		fmm = FastaMixtureMarker(0.001, 6.65)
 		seq = fmm.mark_mixed(fastafile, mixfile)
-		iupac = ['r','R','w','W','y','Y','m','M','s','S','k','K']
+		iupac = ['A','C','G','T','r','R','w','W','y','Y','m','M','s','S','k','K']
 		resDict={}
 		for item in iupac:
 			resDict[item] =  seq.count(item)
 		self.assertEqual(resDict['R'],7)
+		self.assertEqual(resDict['A'],661755)
+		
+class test_fastamixmark_2(unittest.TestCase):
+	def runTest(self):
+		""" tests annotation of fasta with mixed bases """
+
+		print('set up ..')
+		v = vcfScan(expectedErrorRate = 0.001, infotag = 'BaseCounts4', report_minimum_maf = 0.05, compute_pvalue = False)
+		for i in range(100000):
+			v.add_roi(str(1+i),set([1+i]))
+			
+		print('100k regions added; parsing vcf')
+		inputfile=os.path.join("..",'testdata','52858be2-7020-4b7f-acb4-95e00019a7d7_v3.vcf.gz')
+		guid= os.path.basename(inputfile)[0:36]
+		if not os.path.exists(inputfile):
+			self.fail("Input file does not exist.  Please see README.  You may need to install test data.")
+		v.parse(vcffile = inputfile)
+		print("Parse complete; writing output")
+		
+		targetdir = os.path.join("..", "unitTest_tmp")
+		pathlib.Path(targetdir).mkdir(parents=True, exist_ok=True)
+	
+		mixfile = os.path.join(targetdir,'{0}.txt'.format(guid))
+		if os.path.exists(mixfile):
+			os.unlink(mixfile)
+			
+		v.bases.to_csv(mixfile, index=None)
+		self.assertTrue(os.path.exists(mixfile))
+
+		# read outputfile
+		fastafile=os.path.join("..",'testdata','52858be2-7020-4b7f-acb4-95e00019a7d7_v3.fasta')
+	
+		fmm = FastaMixtureMarker(expectedErrorRate=0.001, mlp_cutoff=6.65, clustering_cutoff = 10, min_maf=0)			
+		seq = fmm.mark_mixed(fastafile, mixfile)
+
+		iupac = ['A','C','G','T','r','R','w','W','y','Y','m','M','s','S','k','K']
+		resDict={}
+		for item in iupac:
+			resDict[item] =  seq.count(item)
+		self.assertEqual(resDict['r'],1)
+		self.assertEqual(resDict['A'],661755)
 		
 class lineageScan(vcfScan):
 	""" parses a vcf file, extracting high-quality bases at lineage defining positions, as
