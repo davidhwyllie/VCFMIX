@@ -88,6 +88,8 @@ class FastaMixtureMarker():
 		df = pd.read_csv(mixed_bases_file, index_col='pos')
 	
 		variants_to_update = {}
+
+		
 		for ix in df.index:
 
 			maf = df.loc[ix,'maf']
@@ -104,22 +106,27 @@ class FastaMixtureMarker():
 												  df.loc[ix,'base_c'],
 												  df.loc[ix,'base_g'],
 												  df.loc[ix,'base_t']
-												  ]})
+												  ]
+										 })
 					
 					base = base.sort_values(by='depth', ascending = False)
 					top2 = ''.join(base.head(2)['base'].tolist())
-					variants_to_update[ix-1]= self.iupac[top2]
+					variants_to_update[ix-1]= {'pos':ix-1, 'base':self.iupac[top2]}
 				
-		previous = -10000000
-		for i in sorted(variants_to_update.keys()):
+		bases = sorted(variants_to_update.keys())
+		for i in range(1,len(bases)-1):
 			if self.clustering_cutoff is not None:
-				if i-previous < self.clustering_cutoff:
-					variants_to_update[i] = 'N'
-			previous = i
+				if bases[i]-bases[i-1] <= self.clustering_cutoff:
+					variants_to_update[bases[i]]['base'] = 'N'
+				if bases[i+1]-bases[i] <= self.clustering_cutoff:
+					variants_to_update[bases[i]]['base'] = 'N'
 
-			seq[i] = variants_to_update[i]
-		
-		return(''.join(seq))
+			seq[bases[i]] = variants_to_update[bases[i]]['base']
+
+		df = pd.DataFrame.from_dict(variants_to_update, orient='index')
+		df = df.query("not base=='N'")
+		df = df.query("pos>0")		# don't count the first base
+		return df, ''.join(seq)
 
 class BinomialTest():
 	""" wrapper round stats.binom_test, testing the significance of a particular minor variant count
@@ -646,12 +653,13 @@ class test_fastamixmark_2(unittest.TestCase):
 		fastafile=os.path.join("..",'testdata','52858be2-7020-4b7f-acb4-95e00019a7d7_v3.fasta')
 	
 		fmm = FastaMixtureMarker(expectedErrorRate=0.001, mlp_cutoff=6.65, clustering_cutoff = 10, min_maf=0)			
-		seq = fmm.mark_mixed(fastafile, mixfile)
-
+		df, seq = fmm.mark_mixed(fastafile, mixfile)
+		
 		iupac = ['A','C','G','T','r','R','w','W','y','Y','m','M','s','S','k','K']
 		resDict={}
 		for item in iupac:
 			resDict[item] =  seq.count(item)
+			
 		self.assertEqual(resDict['r'],1)
 		self.assertEqual(resDict['A'],661755)
 		
@@ -746,8 +754,8 @@ class lineageScan(vcfScan):
 
 			else:
 				sorted_region_stats = self.region_stats.sort_values(by='mean_maf', ascending=False)
-				f2_denominator = sum(sorted_region_stats['total_depth'].head(2))
-				f50_denominator = sum(sorted_region_stats['total_depth'].tail(50))
+				f2_denominator =      sum(sorted_region_stats['total_depth'].head(2))
+				f50_denominator =     sum(sorted_region_stats['total_depth'].tail(50))
 				
 				# trap for the situation in which there are no reads, so F2 and F50 can't be computed (divide-by-zero)
 				if  f2_denominator == 0 or f50_denominator == 0:
