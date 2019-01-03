@@ -112,7 +112,8 @@ class FastaMixtureMarker():
 					base = base.sort_values(by='depth', ascending = False)
 					top2 = ''.join(base.head(2)['base'].tolist())
 					variants_to_update[ix-1]= {'pos':ix-1, 'base':self.iupac[top2]}
-				
+		
+		# eliminate clustered Ms		
 		bases = sorted(variants_to_update.keys())
 		for i in range(1,len(bases)-1):
 			if self.clustering_cutoff is not None:
@@ -124,8 +125,10 @@ class FastaMixtureMarker():
 			seq[bases[i]] = variants_to_update[bases[i]]['base']
 
 		df = pd.DataFrame.from_dict(variants_to_update, orient='index')
-		df = df.query("not base=='N'")
-		df = df.query("pos>0")		# don't count the first base
+		if len(df.index)>0 and len(df.columns.values.tolist())>0:
+			if 'base' in df.columns.values.tolist() and 'pos' in df.columns.values.tolist():
+				df = df.query("not base=='N'")
+				df = df.query("pos>0")		# don't count the first base
 		return df, ''.join(seq)
 
 class BinomialTest():
