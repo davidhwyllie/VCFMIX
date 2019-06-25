@@ -59,9 +59,10 @@ summary1 = v.f_statistics()
 ```
 
 ### Example using lineageScan and FastaMixtureMasker to generate a consensus fasta file
+( see also [scientific rationale]( http://biorxiv.org/cgi/content/short/681502v1); the output is an input for the [findNeighbour3 server](https://github.com/davidhwyllie/findNeighbour3)).
 
-( such a file an input for the [findNeighbour3 server](https://github.com/davidhwyllie/findNeighbour3) )
-Example is in /src/fmm_example.py
+
+The below example is in /src/fmm_example.py.
 
 ```
 """ Example of use of FastaMixtureMarker """
